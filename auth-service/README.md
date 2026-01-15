@@ -10,3 +10,4 @@ Modifica permessi docker 2
 Modifica Jenkins file
 Modifica Jenkins file
 Modifica credenziali Jenkins
+Modifica nome immagine
