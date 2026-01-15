@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: map-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: map-service
+  template:
+    metadata:
+      labels:
+        app: map-service
+    spec:
+      containers:
+      - name: map-deployment
+        image: claudia179/map-service-img:latest
+        ports:
+        - containerPort: 5000
+        imagePullPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: map-service
+spec:
+  selector:
+    app: map-service
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000

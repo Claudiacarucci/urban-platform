@@ -54,38 +54,29 @@ pipeline {
 }
 
 def processService(serviceDir, imageName, k8sDeployName) {
-    stage("${serviceDir} - Test") {
+    stage("${serviceDir} - Build & Push") {
         dir(serviceDir) {
-            sh '''
-                python3 -m venv venv
-                . venv/bin/activate
-                pip install -r requirements.txt || echo "Requirements skipped"
-                export PYTHONPATH=$PWD
-                export FLASK_APP=app.py
-                if [ -d "tests" ]; then pytest tests/ --junitxml=test-results.xml; fi
-            '''
-        }
-    }
-
-    stage("${serviceDir} - Docker") {
-        script {
-            dir(serviceDir) {
-                docker.withRegistry('', DOCKER_CREDS) {
-                    // RIMOSSO --network=host: Ora userà il daemon.json che hai configurato!
-                    def img = docker.build("${DOCKER_USER}/${imageName}:${BUILD_NUMBER}")
-                    img.push()
-                    img.push('latest')
-                }
+            withDockerRegistry(credentialsId: 'dockerhub-id', url: 'https://index.docker.io/v1/') {
+                // Build dell'immagine
+                sh "docker build -t ${DOCKER_USER}/${imageName}:${BUILD_NUMBER} ."
+                sh "docker push ${DOCKER_USER}/${imageName}:${BUILD_NUMBER}"
+                
+                // Aggiorna anche il tag 'latest' per comodità
+                sh "docker tag ${DOCKER_USER}/${imageName}:${BUILD_NUMBER} ${DOCKER_USER}/${imageName}:latest"
+                sh "docker push ${DOCKER_USER}/${imageName}:latest"
             }
         }
     }
-    
+
     stage("${serviceDir} - Deploy") {
-        withCredentials([file(credentialsId: K8S_CONFIG, variable: 'KUBECONFIG')]) {
+        withCredentials([file(credentialsId: 'k8s-secret', variable: 'KUBECONFIG')]) {
             script {
-                sh """
-                    kubectl set image deployment/${k8sDeployName} ${k8sDeployName}=${DOCKER_USER}/${imageName}:${BUILD_NUMBER} --record || echo "Deployment non ancora presente, salto aggiornamento."
-                """
+                // 1. Applica la configurazione (Crea deployment/service se non esistono)
+                // Legge il file dalla cartella k8s/ che hai appena creato
+                sh "kubectl apply -f k8s/${serviceDir}.yaml"
+                
+                // 2. Forza l'aggiornamento all'immagine appena buildata (tag BUILD_NUMBER)
+                sh "kubectl set image deployment/${k8sDeployName} ${k8sDeployName}=${DOCKER_USER}/${imageName}:${BUILD_NUMBER} --record"
             }
         }
     }
