@@ -11,3 +11,4 @@ Modifica Jenkins file
 Modifica Jenkins file
 Modifica credenziali Jenkins
 Modifica nome immagine
+Ultimo deploy: Thu Jan 15 10:24:02 PM CET 2026
