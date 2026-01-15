@@ -3,3 +3,4 @@
 # Tentativo 3 con librerie SQL installate
 Correzione python path
 Plugins docker
+Permessi docker
