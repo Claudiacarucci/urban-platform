@@ -60,11 +60,8 @@ def processService(serviceDir, imageName, k8sDeployName) {
                 python3 -m venv venv
                 . venv/bin/activate
                 pip install -r requirements.txt || echo "Requirements skipped"
-                
-                # QUESTA È LA RIGA CHE MANCAVA:
                 export PYTHONPATH=$PWD
                 export FLASK_APP=app.py
-                
                 if [ -d "tests" ]; then pytest tests/ --junitxml=test-results.xml; fi
             '''
         }
@@ -74,7 +71,8 @@ def processService(serviceDir, imageName, k8sDeployName) {
         script {
             dir(serviceDir) {
                 docker.withRegistry('', DOCKER_CREDS) {
-                    def img = docker.build("${DOCKER_USER}/${imageName}:${BUILD_NUMBER}")
+                    // MODIFICA QUI: Aggiunto "--network=host" per forzare l'uso di internet
+                    def img = docker.build("${DOCKER_USER}/${imageName}:${BUILD_NUMBER}", "--network=host .")
                     img.push()
                     img.push('latest')
                 }

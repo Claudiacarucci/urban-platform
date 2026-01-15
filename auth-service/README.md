@@ -5,3 +5,4 @@ Correzione python path
 Plugins docker
 Permessi docker
 Permessi docker DNS
+Modifica Jenkins file
