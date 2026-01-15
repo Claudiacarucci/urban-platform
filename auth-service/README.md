@@ -4,3 +4,4 @@
 Correzione python path
 Plugins docker
 Permessi docker
+Permessi docker DNS
