@@ -71,8 +71,8 @@ def processService(serviceDir, imageName, k8sDeployName) {
         script {
             dir(serviceDir) {
                 docker.withRegistry('', DOCKER_CREDS) {
-                    // MODIFICA QUI: Aggiunto "--network=host" per forzare l'uso di internet
-                    def img = docker.build("${DOCKER_USER}/${imageName}:${BUILD_NUMBER}", "--network=host .")
+                    // RIMOSSO --network=host: Ora userà il daemon.json che hai configurato!
+                    def img = docker.build("${DOCKER_USER}/${imageName}:${BUILD_NUMBER}")
                     img.push()
                     img.push('latest')
                 }
