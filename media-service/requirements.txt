@@ -4,3 +4,4 @@ flask-migrate==4.0.5
 pytest==7.4.2
 requests==2.31.0
 psycopg2-binary==2.9.7
+Trigger build: Thu Jan 15 10:18:16 PM CET 2026
