@@ -6,3 +6,4 @@ Plugins docker
 Permessi docker
 Permessi docker DNS
 Modifica Jenkins file
+Modifica permessi docker 2
