@@ -8,3 +8,4 @@ __pycache__/
 instance/
 *.db
 !migrations/
+setup_all_services.sh
