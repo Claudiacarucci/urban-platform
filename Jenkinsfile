@@ -63,17 +63,21 @@ pipeline {
         stage('Test di Integrazione (Postman)') {
             steps {
                 script {
-                    echo "Avvio scansione dei file di collezione Postman per i test di integrazione..."
+                    echo "Avvio scansione dei file di collezione Postman tramite shell..."
                     
-                    // Ricerca dei file JSON nelle cartelle 'tests' dei servizi
-                    def collections = findFiles(glob: '**/tests/*_collection.json')
+                    // FIX: Uso 'find' di Linux invece del plugin 'findFiles' che manca
+                    // Cerca tutti i file che finiscono con _collection.json dentro le cartelle 'tests'
+                    def findOutput = sh(script: 'find . -type f -path "*/tests/*_collection.json"', returnStdout: true).trim()
 
-                    if (collections.length > 0) {
+                    if (findOutput) {
+                        // Trasformo la stringa di output in una lista
+                        def collections = findOutput.split("\n")
+                        
                         docker.image('postman/newman').inside {
-                            collections.each { collection ->
-                                echo "Esecuzione della collezione Postman: ${collection.path} tramite Newman..."
+                            collections.each { collectionPath ->
+                                echo "Esecuzione della collezione Postman: ${collectionPath} tramite Newman..."
                                 // Esecuzione del reporter Newman
-                                sh "newman run ${collection.path} --reporters cli"
+                                sh "newman run ${collectionPath} --reporters cli"
                             }
                         }
                     } else {
