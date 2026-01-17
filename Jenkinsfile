@@ -65,18 +65,19 @@ pipeline {
                 script {
                     echo "Avvio scansione dei file di collezione Postman tramite shell..."
                     
-                    // FIX: Uso 'find' di Linux invece del plugin 'findFiles' che manca
-                    // Cerca tutti i file che finiscono con _collection.json dentro le cartelle 'tests'
+                    // Utilizzo del comando 'find' nativo per individuare i file JSON delle collezioni
                     def findOutput = sh(script: 'find . -type f -path "*/tests/*_collection.json"', returnStdout: true).trim()
 
                     if (findOutput) {
-                        // Trasformo la stringa di output in una lista
+                        // Converte l'output in una lista di percorsi
                         def collections = findOutput.split("\n")
                         
-                        docker.image('postman/newman').inside {
+                        // --entrypoint='': Sovrascrive il comando di default di Newman che causava l'uscita immediata.
+                        // -u 0:0: Esegue come root per evitare problemi di permessi.
+                        docker.image('postman/newman').inside("--entrypoint='' -u 0:0") {
                             collections.each { collectionPath ->
                                 echo "Esecuzione della collezione Postman: ${collectionPath} tramite Newman..."
-                                // Esecuzione del reporter Newman
+                                // Esegue i test e riporta i risultati in console (cli)
                                 sh "newman run ${collectionPath} --reporters cli"
                             }
                         }
@@ -100,22 +101,23 @@ def processService(serviceDir, imageName, k8sDeployName) {
             script {
                 echo "[${serviceDir}] Inizializzazione del database PostgreSQL Sandbox effimero per i test unitari..."
                 
+                // Avvio del container database isolato
                 docker.image('postgres:13').withRun('-e POSTGRES_DB=test_db -e POSTGRES_USER=test_user -e POSTGRES_PASSWORD=test_pass') { c ->
                     
-                    // Attesa disponibilità del database
+                    // Attesa disponibilità del database (Health Check)
                     docker.image('postgres:13').inside("--link ${c.id}:db") {
                         sh 'while ! pg_isready -h db -U test_user; do sleep 1; done'
                     }
 
                     // Esecuzione Test Python
-                    // NOTA: Esecuzione come root (-u 0:0) per consentire l'installazione tramite pip
+                    // NOTA: Esecuzione come root (-u 0:0) necessaria per pip install
                     docker.image('python:3.9').inside("--link ${c.id}:db -u 0:0") {
                         
                         echo "[${serviceDir}] Installazione delle dipendenze Python dal file requirements.txt..."
                         sh 'pip install -r requirements.txt'
                         
                         echo "[${serviceDir}] Esecuzione dei test unitari localizzati in tests/test_unit.py..."
-                        // Iniezione della configurazione del database per conftest.py
+                        // Iniezione della variabile d'ambiente per forzare l'uso del DB Sandbox
                         withEnv(['DATABASE_URL=postgresql://test_user:test_pass@db:5432/test_db']) {
                             sh 'pytest tests/test_unit.py'
                         }
@@ -132,7 +134,7 @@ def processService(serviceDir, imageName, k8sDeployName) {
                 echo "[${serviceDir}] Creazione dell'immagine Docker..."
                 sh "docker build -t ${DOCKER_USER}/${imageName}:${BUILD_NUMBER} ."
                 
-                echo "[${serviceDir}] Invio dell'immagine al registry..."
+                echo "[${serviceDir}] Invio dell'immagine al registry Docker Hub..."
                 sh "docker push ${DOCKER_USER}/${imageName}:${BUILD_NUMBER}"
                 sh "docker tag ${DOCKER_USER}/${imageName}:${BUILD_NUMBER} ${DOCKER_USER}/${imageName}:latest"
                 sh "docker push ${DOCKER_USER}/${imageName}:latest"
