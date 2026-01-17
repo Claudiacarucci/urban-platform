@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        // Credenziali salvate in Jenkins
+        // Configurazione Globale e Credenziali
         DOCKER_CREDS = 'dockerhub-id'
         K8S_CONFIG   = 'k8s-secret'
         DOCKER_USER  = 'claudia179'
@@ -11,15 +11,15 @@ pipeline {
     stages {
         stage('Inizializzazione') {
             steps {
-                echo "🚀 Avvio Pipeline CI/CD per ${DOCKER_USER}"
+                echo "Avvio dell'esecuzione della pipeline CI/CD per l'utente: ${DOCKER_USER}"
             }
         }
 
         // --------------------------------------------------------
-        // FASE 1: PARALLEL PIPELINE PER OGNI MICROSERVIZIO
-        // (Unit Test -> Build -> Push -> Deploy)
+        // FASE 1: PIPELINE PARALLELA PER I MICROSERVIZI
+        // (Test Unitari -> Build -> Push -> Deploy)
         // --------------------------------------------------------
-        stage('Gestione Microservizi') {
+        stage('Gestione Ciclo di Vita Microservizi') {
             parallel {
                 stage('Auth Service') {
                     when { changeset "auth-service/**" }
@@ -57,29 +57,27 @@ pipeline {
         }
 
         // --------------------------------------------------------
-        // FASE 2: TEST DI INTEGRAZIONE FINALE (POSTMAN/NEWMAN)
-        // Eseguiti solo se il deploy è andato a buon fine
+        // FASE 2: TEST DI INTEGRAZIONE (POSTMAN/NEWMAN)
+        // Eseguiti solo in caso di deploy avvenuto con successo
         // --------------------------------------------------------
-        stage('Integration Tests (Postman)') {
+        stage('Test di Integrazione (Postman)') {
             steps {
                 script {
-                    echo "🔍 Ricerca ed esecuzione collezioni Postman..."
+                    echo "Avvio scansione dei file di collezione Postman per i test di integrazione..."
                     
-                    // Cerca tutti i file JSON nelle cartelle 'tests' dei servizi
-                    // Esempio: auth-service/tests/auth_collection.json
+                    // Ricerca dei file JSON nelle cartelle 'tests' dei servizi
                     def collections = findFiles(glob: '**/tests/*_collection.json')
 
                     if (collections.length > 0) {
                         docker.image('postman/newman').inside {
                             collections.each { collection ->
-                                echo "⚡ Eseguendo test: ${collection.path}"
-                                // Esegue newman. 
-                                // Nota: Assicurati che le URL nel JSON puntino ai Service K8s (es. http://auth-service:5000)
+                                echo "Esecuzione della collezione Postman: ${collection.path} tramite Newman..."
+                                // Esecuzione del reporter Newman
                                 sh "newman run ${collection.path} --reporters cli"
                             }
                         }
                     } else {
-                        echo "⚠️ Nessun file Postman trovato. Salto questo step."
+                        echo "Nessun file di collezione Postman trovato. La fase di test di integrazione sarà saltata."
                     }
                 }
             }
@@ -88,30 +86,34 @@ pipeline {
 }
 
 // --------------------------------------------------------
-// FUNZIONE CORE: Gestisce il ciclo di vita del singolo servizio
+// FUNZIONE CORE: Gestore del ciclo di vita del servizio
 // --------------------------------------------------------
 def processService(serviceDir, imageName, k8sDeployName) {
     
-    // 1. UNIT TESTING (Sandbox Pattern)
-    // Avviamo un DB pulito solo per la durata del test
-    stage("${serviceDir} - Unit Tests") {
+    // 1. TEST UNITARI (Pattern Sandbox)
+    stage("${serviceDir} - Test Unitari") {
         dir(serviceDir) {
             script {
-                echo "🧪 [${serviceDir}] Avvio DB Sandbox..."
+                echo "[${serviceDir}] Inizializzazione del database PostgreSQL Sandbox effimero per i test unitari..."
                 
                 docker.image('postgres:13').withRun('-e POSTGRES_DB=test_db -e POSTGRES_USER=test_user -e POSTGRES_PASSWORD=test_pass') { c ->
                     
-                    // Wait for DB ready
+                    // Attesa disponibilità del database
                     docker.image('postgres:13').inside("--link ${c.id}:db") {
                         sh 'while ! pg_isready -h db -U test_user; do sleep 1; done'
                     }
 
-                    // Esecuzione Pytest con Injection della Variabile
-                    docker.image('python:3.9').inside("--link ${c.id}:db") {
+                    // Esecuzione Test Python
+                    // NOTA: Esecuzione come root (-u 0:0) per consentire l'installazione tramite pip
+                    docker.image('python:3.9').inside("--link ${c.id}:db -u 0:0") {
+                        
+                        echo "[${serviceDir}] Installazione delle dipendenze Python dal file requirements.txt..."
                         sh 'pip install -r requirements.txt'
-                        // Qui avviene la magia: DATABASE_URL attiva la logica nel tuo conftest.py
+                        
+                        echo "[${serviceDir}] Esecuzione dei test unitari localizzati in tests/test_unit.py..."
+                        // Iniezione della configurazione del database per conftest.py
                         withEnv(['DATABASE_URL=postgresql://test_user:test_pass@db:5432/test_db']) {
-                            sh 'pytest'
+                            sh 'pytest tests/test_unit.py'
                         }
                     }
                 }
@@ -123,7 +125,10 @@ def processService(serviceDir, imageName, k8sDeployName) {
     stage("${serviceDir} - Build & Push") {
         dir(serviceDir) {
             withDockerRegistry(credentialsId: 'dockerhub-id', url: 'https://index.docker.io/v1/') {
+                echo "[${serviceDir}] Creazione dell'immagine Docker..."
                 sh "docker build -t ${DOCKER_USER}/${imageName}:${BUILD_NUMBER} ."
+                
+                echo "[${serviceDir}] Invio dell'immagine al registry..."
                 sh "docker push ${DOCKER_USER}/${imageName}:${BUILD_NUMBER}"
                 sh "docker tag ${DOCKER_USER}/${imageName}:${BUILD_NUMBER} ${DOCKER_USER}/${imageName}:latest"
                 sh "docker push ${DOCKER_USER}/${imageName}:latest"
@@ -135,13 +140,13 @@ def processService(serviceDir, imageName, k8sDeployName) {
     stage("${serviceDir} - Deploy") {
         withCredentials([file(credentialsId: 'k8s-secret', variable: 'KUBECONFIG')]) {
             script {
-                // Applica o Aggiorna le risorse YAML
+                echo "[${serviceDir}] Applicazione della configurazione Kubernetes..."
                 sh "kubectl apply -f k8s/${serviceDir}.yaml"
                 
-                // Aggiorna l'immagine
+                echo "[${serviceDir}] Aggiornamento dell'immagine di deployment..."
                 sh "kubectl set image deployment/${k8sDeployName} ${k8sDeployName}=${DOCKER_USER}/${imageName}:${BUILD_NUMBER} --record"
                 
-                // IMPORTANTE: Aspetta che il deploy sia finito prima di passare ai test di integrazione
+                echo "[${serviceDir}] Verifica dello stato del rollout..."
                 sh "kubectl rollout status deployment/${k8sDeployName} --timeout=60s"
             }
         }
